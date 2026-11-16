@@ -119,6 +119,71 @@ const variants = {
     },
     pages: ['docs/', 'docs/diagrams/'],
   },
+  'custom-navbar': {
+    options: {
+      title: 'A longer project name',
+      files: {
+        ...files,
+        'content/_index.fr.md': '---\ntitle: Accueil\n---\n',
+        'assets/scss/_variables_project.scss': `
+$td-navbar-min-height: 5rem;
+$td-navbar__main-min-height-mobile: 3rem;
+$grid-breakpoints: (
+  xs: 0, sm: 600px, md: 1000px, lg: 1200px, xl: 1400px, xxl: 1600px
+);
+`,
+        'assets/scss/_styles_project.scss': `
+.td-navbar .scroll-indicator { min-width: 2rem; }
+.td-navbar .navbar-brand__name { display: none; }
+`,
+      },
+      extraConfig: `languages:
+  en: { languageName: English, weight: 1 }
+  fr: { languageName: Français, weight: 2 }
+params:
+  gcs_engine_id: fake
+  version_menu: Releases
+  versions:
+    - { version: current, url: 'https://example.org/' }
+  ui:
+    showLightDarkModeMenu: true
+    navbar_theme: dark
+`,
+    },
+    pages: ['docs/'],
+  },
+  'no-indicators': {
+    options: {
+      files: {
+        ...files,
+        'layouts/_partials/navbar.html': `
+<nav class="td-navbar">
+  <div class="td-navbar-container container-fluid">
+    <a class="navbar-brand" href="/">Custom brand</a>
+    <div class="td-navbar-nav-scroll" id="main_navbar">
+      <ul class="navbar-nav"><li class="nav-item"><a class="nav-link" href="/docs/">Docs</a></li></ul>
+    </div>
+  </div>
+</nav>
+`,
+      },
+    },
+    pages: ['docs/'],
+  },
+  'minimal-navbar': {
+    options: {
+      files: {
+        ...files,
+        'layouts/_partials/navbar.html': `
+<nav class="td-navbar">
+  <ul class="navbar-nav"><li class="nav-item"><a class="nav-link" href="/docs/">Docs</a></li></ul>
+</nav>
+<div class="scroll-indicator visible" id="custom-indicator">Custom indicator</div>
+`,
+      },
+    },
+    pages: ['docs/'],
+  },
 };
 
 const visits = Object.entries(variants).flatMap(([variant, { pages }]) =>
@@ -471,6 +536,99 @@ test('js behavior: the navbar is transparent over the cover and solid after scro
   }
 });
 
+for (const variant of [
+  'gcs-search',
+  'custom-navbar',
+  'no-indicators',
+  'minimal-navbar',
+]) {
+  for (const width of [500, 900, 1600]) {
+    test(`js behavior: a fitting ${variant} navbar keeps its position at ${width}px after scripts load`, async () => {
+      const withoutScripts = await browser.newPage();
+      const { page, pageErrors } = await newProbePage();
+      try {
+        const viewport = { width, height: 800 };
+        await Promise.all([
+          withoutScripts.setViewport(viewport),
+          page.setViewport(viewport),
+        ]);
+        await withoutScripts.setJavaScriptEnabled(false);
+        const url = `${servers[variant].origin}/docs/`;
+        await Promise.all([
+          withoutScripts.goto(url, { waitUntil: 'networkidle0' }),
+          page.goto(url, { waitUntil: 'networkidle0' }),
+        ]);
+        const navbarLayout = (p) =>
+          p.evaluate(async () => {
+            await document.fonts.ready;
+            const nav = document.querySelector('.navbar-nav');
+            const rect = nav.getBoundingClientRect();
+            return {
+              x: rect.x,
+              y: rect.y,
+              width: rect.width,
+              height: rect.height,
+              overflow: nav.scrollWidth > nav.clientWidth,
+            };
+          });
+        const [initial, loaded] = await Promise.all([
+          navbarLayout(withoutScripts),
+          navbarLayout(page),
+        ]);
+        assert.equal(initial.overflow, false, 'menu fits before scripts run');
+        assert.deepEqual(
+          loaded,
+          initial,
+          'menu stays in place after scripts run',
+        );
+        assert.equal(
+          await page.$('.td-navbar-nav-scroll--indicator'),
+          null,
+          'overflow class is cleared when the menu fits',
+        );
+        if (variant === 'custom-navbar') {
+          for (const selector of [
+            '.td-navbar .td-lang-menu',
+            '.td-navbar .td-version-menu',
+            '.td-navbar .td-light-dark-menu',
+            '.td-navbar .td-search',
+          ]) {
+            assert.ok(await page.$(selector), `${selector} is present`);
+          }
+          assert.equal(
+            await page.$eval(
+              '.td-navbar',
+              (el) => getComputedStyle(el).position,
+            ),
+            width < 1000 ? 'relative' : 'fixed',
+            'custom breakpoint is applied',
+          );
+          assert.equal(
+            await page.$eval(
+              '.td-navbar',
+              (el) => getComputedStyle(el).minHeight,
+            ),
+            width < 1000 ? '128px' : '80px',
+            'custom navbar heights are applied',
+          );
+        }
+        if (variant === 'minimal-navbar') {
+          assert.equal(
+            await page.$eval('#custom-indicator', (el) =>
+              el.classList.contains('visible'),
+            ),
+            true,
+            'unrelated indicator keeps its visibility',
+          );
+        }
+        assert.deepEqual(pageErrors, [], 'probe ran without page errors');
+      } finally {
+        await Promise.all([withoutScripts.close(), page.close()]);
+      }
+    });
+  }
+}
+
 test('js behavior: an overflowing navbar menu shows scroll indicators and scrolls on click', async () => {
   const { page, pageErrors } = await newProbePage();
   try {
@@ -491,6 +649,40 @@ test('js behavior: an overflowing navbar menu shows scroll indicators and scroll
       ),
       true,
       'overflow class is set on the navbar container',
+    );
+    assert.equal(
+      await page.$eval('#main_navbar .scroll-right', (el) =>
+        el.classList.contains('visible'),
+      ),
+      true,
+      'right indicator is visible',
+    );
+    await page.setViewport({ width: 3000, height: 800 });
+    await page.waitForFunction(
+      () =>
+        !document
+          .querySelector('.td-navbar-container')
+          .classList.contains('navbar-is-overflowing'),
+      { timeout: 5000 },
+    );
+    assert.equal(
+      await page.$eval('.td-navbar-container', (el) =>
+        el.classList.contains('navbar-is-overflowing'),
+      ),
+      false,
+      'overflow clears when the menu fits',
+    );
+    assert.equal(
+      await page.$eval('#main_navbar .scroll-right', (el) =>
+        el.classList.contains('visible'),
+      ),
+      false,
+      'indicator is hidden when the menu fits',
+    );
+    await page.setViewport({ width: 500, height: 800 });
+    await page.waitForFunction(
+      () => document.querySelector('#main_navbar .scroll-right.visible'),
+      { timeout: 5000 },
     );
     await page.click('#main_navbar .scroll-right');
     await page.waitForFunction(

@@ -32,7 +32,9 @@
   }
 }
 
+.td-navbar-nav-scroll,
 .td-navbar-nav-scroll--indicator {
+  // Keep the layout stable when the overflow state changes.
   display: flex;
   flex-direction: row;
   align-items: center;
@@ -76,7 +78,9 @@
       pointer-events: auto;
     }
   }
+}
 
+.td-navbar-nav-scroll--indicator {
   // Customize the scrollbar appearance.
   .navbar-nav {
     &::-webkit-scrollbar {

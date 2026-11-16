@@ -98,6 +98,9 @@ limitations under the License.
     } else {
       if (container) {
         container.classList.remove('td-navbar-nav-scroll--indicator');
+        container.querySelectorAll('.scroll-indicator').forEach((el) => {
+          el.classList.remove('visible');
+        });
       }
       if (navbarContainer) {
         navbarContainer.classList.remove('navbar-is-overflowing');
